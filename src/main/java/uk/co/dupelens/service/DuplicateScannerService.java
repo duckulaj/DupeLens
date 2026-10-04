@@ -2,6 +2,9 @@ package uk.co.dupelens.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Service;
 import uk.co.dupelens.model.*;
 import uk.co.dupelens.repository.FileRepository;
@@ -11,8 +14,12 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
@@ -21,6 +28,7 @@ import java.util.stream.Collectors;
 @Service
 public class DuplicateScannerService {
     private static final Logger log = LoggerFactory.getLogger(DuplicateScannerService.class);
+    private static final int AI_REQUEST_CONCURRENCY = 2;
     private final FileRepository files;
     private final ScanRepository scans;
     private final SettingsService settings;
@@ -30,6 +38,10 @@ public class DuplicateScannerService {
     private final VideoFingerprintService videos;
     private final OllamaAiService ai;
     private final ScanProgressService progress;
+    private final MeterRegistry meters;
+    private final Counter aiAnalyzed;
+    private final Counter aiCached;
+    private final Counter aiFailed;
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
     private final AtomicBoolean cancel = new AtomicBoolean(false);
     private final AtomicBoolean paused = new AtomicBoolean(false);
@@ -38,9 +50,13 @@ public class DuplicateScannerService {
 
     public DuplicateScannerService(FileRepository files, ScanRepository scans, SettingsService settings,
                                    FileClassifier classifier, HashService hashes, PerceptualHashService perceptual,
-                                   VideoFingerprintService videos, OllamaAiService ai, ScanProgressService progress) {
+                                   VideoFingerprintService videos, OllamaAiService ai, ScanProgressService progress,
+                                   MeterRegistry meters) {
         this.files=files; this.scans=scans; this.settings=settings; this.classifier=classifier; this.hashes=hashes;
-        this.perceptual=perceptual; this.videos=videos; this.ai=ai; this.progress=progress;
+        this.perceptual=perceptual; this.videos=videos; this.ai=ai; this.progress=progress; this.meters=meters;
+        this.aiAnalyzed=Counter.builder("dupelens.ai.images").tag("outcome","analyzed").register(meters);
+        this.aiCached=Counter.builder("dupelens.ai.images").tag("outcome","cached").register(meters);
+        this.aiFailed=Counter.builder("dupelens.ai.images").tag("outcome","failed").register(meters);
     }
 
     public synchronized boolean start(ScanRequest request) {
@@ -66,28 +82,52 @@ public class DuplicateScannerService {
     private void run(long scanId, ScanRequest request) {
         try {
             AppSettings cfg=settings.get();
-            discover(scanId,request,cfg);
+            timedStage(scanId,"discovery",()->{discover(scanId,request,cfg);return null;});
             checkCancel();
             files.clearGroups(scanId);
-            ResultCounts exact=findExact(scanId);
+            ResultCounts exact=timedStage(scanId,"exact_duplicates",()->findExact(scanId));
             progress.counts(exact.groups,exact.files,exact.reclaimable,0,0,0);
             checkCancel();
-            int imageGroups=findSimilarImages(scanId,cfg.imageHammingThreshold());
+            int imageGroups=timedStage(scanId,"similar_images",()->findSimilarImages(scanId,cfg.imageHammingThreshold()));
             progress.counts(exact.groups,exact.files,exact.reclaimable,imageGroups,0,0);
             checkCancel();
-            int videoGroups=findSimilarVideos(scanId,cfg.videoHammingThreshold(),cfg.videoDurationTolerance());
+            int videoGroups=timedStage(scanId,"similar_videos",()->findSimilarVideos(scanId,cfg.videoHammingThreshold(),cfg.videoDurationTolerance()));
             progress.counts(exact.groups,exact.files,exact.reclaimable,imageGroups,videoGroups,0);
             checkCancel();
-            int aiGroups=request.aiEnabled()?runAi(scanId):0;
+            int aiGroups=request.aiEnabled()?timedStage(scanId,"ai_grouping",()->runAi(scanId)):0;
             progress.counts(exact.groups,exact.files,exact.reclaimable,imageGroups,videoGroups,aiGroups);
-            progress.phase("FINALISING","Finalising scan",99);
-            progress.done(false,null);
-            scans.finish(progress.get(),"COMPLETED");
+            timedStage(scanId,"finalising",()->{
+                progress.phase("FINALISING","Finalising scan",99);
+                progress.done(false,null);
+                scans.finish(progress.get(),"COMPLETED");
+                return null;
+            });
         } catch(CancelledException e) {
             progress.done(true,null); scans.finish(progress.get(),"CANCELLED");
         } catch(Exception e) {
             log.error("Scan failed",e); progress.done(false,e.getMessage()); scans.finish(progress.get(),"FAILED");
         }
+    }
+
+    private <T> T timedStage(long scanId,String stage,TimedOperation<T> operation) throws Exception {
+        Timer.Sample sample=Timer.start(meters);
+        long started=System.nanoTime();
+        String outcome="completed";
+        try {
+            return operation.run();
+        } catch(Exception e) {
+            outcome="failed";
+            throw e;
+        } finally {
+            sample.stop(meters.timer("dupelens.scan.phase","phase",stage));
+            log.info("Scan {} stage {} {} in {} ms",scanId,stage,outcome,
+                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started));
+        }
+    }
+
+    @FunctionalInterface
+    private interface TimedOperation<T> {
+        T run() throws Exception;
     }
 
     private void discover(long scanId, ScanRequest request, AppSettings cfg) throws IOException {
@@ -222,25 +262,86 @@ public class DuplicateScannerService {
         Map<String,IndexedFile> reps=new LinkedHashMap<>();
         for(IndexedFile f:images){ String key=f.fullHash()!=null?"hash:"+f.fullHash():"id:"+f.id(); reps.putIfAbsent(key,f); }
         int done=0;
-        for(IndexedFile f:reps.values()){
-            checkCancel();
-            if(f.aiProcessed()){
-                AiAnalysis existing=new AiAnalysis(nvl(f.aiCategory(),"other"),nvl(f.aiScene(),"unknown"),nvl(f.aiSubjects(),""),nvl(f.aiKeywords(),""),nvl(f.aiSummary(),""));
-                if(f.fullHash()!=null) files.updateAiByFullHash(scanId,f.fullHash(),existing);
-            } else {
-                try { AiAnalysis a=ai.analyse(Path.of(f.path())); files.updateAi(f.id(),a); if(f.fullHash()!=null)files.updateAiByFullHash(scanId,f.fullHash(),a); }
-                catch(Exception e){ log.warn("AI analysis failed {}: {}",f.path(),e.getMessage()); }
+        ExecutorService aiExecutor=Executors.newFixedThreadPool(AI_REQUEST_CONCURRENCY);
+        try {
+            ExecutorCompletionService<String> completedImages=new ExecutorCompletionService<>(aiExecutor);
+            for(IndexedFile f:reps.values()) completedImages.submit(()->processAiImage(scanId,f));
+            while(done<reps.size()){
+                checkCancel();
+                Future<String> completed;
+                try {
+                    completed=completedImages.poll(150,TimeUnit.MILLISECONDS);
+                } catch(InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new CancelledException();
+                }
+                if(completed==null) continue;
+                String path;
+                try {
+                    path=completed.get();
+                } catch(InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new CancelledException();
+                } catch(ExecutionException e) {
+                    Throwable cause=e.getCause();
+                    if(cause instanceof CancelledException) throw new CancelledException();
+                    throw new IllegalStateException("AI image processing failed",cause);
+                }
+                done++;
+                progress.current(path,progress.get().filesSeen(),progress.get().bytesSeen(),
+                        80+(int)(17.0*done/Math.max(1,reps.size())));
             }
-            done++; progress.current(f.path(),progress.get().filesSeen(),progress.get().bytesSeen(),80+(int)(17.0*done/Math.max(1,reps.size())));
+        } finally {
+            aiExecutor.shutdownNow();
         }
-        images=files.findByScanAndType(scanId,MediaType.IMAGE);
-        Map<String,List<Long>> groups=new TreeMap<>();
-        for(IndexedFile f:images) if(f.aiProcessed()){
-            String key=nvl(f.aiCategory(),"other").trim().toLowerCase(Locale.ROOT)+"|"+nvl(f.aiScene(),"unknown").trim().toLowerCase(Locale.ROOT);
-            groups.computeIfAbsent(key,k->new ArrayList<>()).add(f.id());
-        }
-        int n=0; for(List<Long> ids:groups.values()) files.setAiGroup(ids,"A"+(++n));
+        int n=timedAiGrouping(()->{
+            List<IndexedFile> processedImages=files.findByScanAndType(scanId,MediaType.IMAGE);
+            Map<String,List<Long>> groups=new TreeMap<>();
+            for(IndexedFile f:processedImages) if(f.aiProcessed()){
+                String key=nvl(f.aiCategory(),"other").trim().toLowerCase(Locale.ROOT)+"|"+nvl(f.aiScene(),"unknown").trim().toLowerCase(Locale.ROOT);
+                groups.computeIfAbsent(key,k->new ArrayList<>()).add(f.id());
+            }
+            int groupCount=0;
+            for(List<Long> ids:groups.values()) files.setAiGroup(ids,"A"+(++groupCount));
+            return groupCount;
+        });
         progress.phase("AI_GROUPING","AI grouping complete",98); return n;
+    }
+
+    private String processAiImage(long scanId,IndexedFile f) {
+        checkCancel();
+        if(f.aiProcessed()){
+            aiCached.increment();
+            AiAnalysis existing=new AiAnalysis(nvl(f.aiCategory(),"other"),nvl(f.aiScene(),"unknown"),
+                    nvl(f.aiSubjects(),""),nvl(f.aiKeywords(),""),nvl(f.aiSummary(),""));
+            if(f.fullHash()!=null) timeAiDatabase(()->files.updateAiByFullHash(scanId,f.fullHash(),existing));
+        } else {
+            try {
+                AiAnalysis a=ai.analyse(Path.of(f.path()));
+                timeAiDatabase(()->{
+                    files.updateAi(f.id(),a);
+                    if(f.fullHash()!=null)files.updateAiByFullHash(scanId,f.fullHash(),a);
+                });
+                aiAnalyzed.increment();
+            } catch(Exception e) {
+                if(cancel.get()) throw new CancelledException();
+                aiFailed.increment();
+                log.warn("AI analysis failed {}: {}",f.path(),e.getMessage());
+            }
+        }
+        return f.path();
+    }
+
+    private void timeAiDatabase(Runnable operation) {
+        Timer.Sample sample=Timer.start(meters);
+        try { operation.run(); }
+        finally { sample.stop(meters.timer("dupelens.ai.database")); }
+    }
+
+    private <T> T timedAiGrouping(java.util.function.Supplier<T> operation) {
+        Timer.Sample sample=Timer.start(meters);
+        try { return operation.get(); }
+        finally { sample.stop(meters.timer("dupelens.ai.grouping")); }
     }
 
     private boolean excluded(Path p,Set<String> patterns){

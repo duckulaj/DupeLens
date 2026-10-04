@@ -9,6 +9,7 @@ DupeLens is a local-first Spring Boot application inspired by `fdupes`, with a s
 - Similar-image detection using 64-bit perceptual dHash and locality-sensitive candidate bucketing.
 - Similar/transcoded-video detection using `ffprobe` duration plus five sampled `ffmpeg` frame hashes.
 - Local AI photo grouping through **Ollama**, defaulting to `gemma3:4b`.
+- AI image analysis uses up to two concurrent Ollama requests to improve scan throughput while limiting additional local model load.
 - AI category, scene, subjects, keywords and summary metadata stored locally in SQLite.
 - Multiple scan roots, recursive/non-recursive scanning, exclusions, min/max file-size filters, hidden-file option, scan history and live progress.
 - Pause, resume and cancel controls (pause takes effect after the currently processed file/tool call).
@@ -151,6 +152,28 @@ java -jar target/dupelens-0.1.0.jar
 - `/history` scan-history summaries
 - `/actuator/health` Spring Boot health
 - `/actuator/metrics` metrics
+
+### Scan performance metrics
+
+Scan stage timers are recorded as they complete and also logged with the scan ID and elapsed milliseconds. AI sub-stage timers are updated per image, so they can be inspected while an AI stage is still running. Actuator timer responses include the measurement count, total time and maximum time; durations are reported in seconds.
+
+Useful metric names:
+
+- `dupelens.scan.phase`, filtered by `phase` (`discovery`, `exact_duplicates`, `similar_images`, `similar_videos`, `ai_grouping`, or `finalising`)
+- `dupelens.ai.image.prepare` — image decoding, resizing and Base64 encoding
+- `dupelens.ai.ollama.request` — time waiting for Ollama, including inference
+- `dupelens.ai.response.parse` — parsing the model response
+- `dupelens.ai.database` — persisting or reusing AI analysis
+- `dupelens.ai.grouping` — reading processed images and assigning AI groups
+- `dupelens.ai.ollama.availability` — Ollama availability check
+- `dupelens.ai.images`, filtered by `outcome` (`analyzed`, `cached`, or `failed`)
+
+For example, to inspect the AI stage and Ollama inference time:
+
+```bash
+curl 'http://localhost:8080/actuator/metrics/dupelens.scan.phase?tag=phase:ai_grouping'
+curl http://localhost:8080/actuator/metrics/dupelens.ai.ollama.request
+```
 
 ## Safety notes
 
