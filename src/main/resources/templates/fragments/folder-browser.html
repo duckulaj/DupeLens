@@ -1,0 +1,11 @@
+<div th:fragment="browser">
+  <div class="folder-current" th:text="${current}">/home</div>
+  <div style="display:flex;gap:8px;margin-top:12px">
+    <button th:if="${parent != null}" class="btn secondary small" type="button" th:attr="data-path=${parent}" onclick="loadFolders(this.dataset.path)">⬆ Parent</button>
+    <button class="btn primary small" type="button" th:attr="data-path=${current}" onclick="selectCurrentFolder(this.dataset.path)">✓ Select this folder</button>
+  </div>
+  <div class="folder-list">
+    <button class="folder" th:each="d:${dirs}" type="button" th:attr="data-path=${d.path}" onclick="loadFolders(this.dataset.path)">📁 <span th:text="${d.name}">Folder</span></button>
+  </div>
+  <div class="muted" th:if="${#lists.isEmpty(dirs)}">No readable subfolders.</div>
+</div>

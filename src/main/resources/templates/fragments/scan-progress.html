@@ -1,0 +1,27 @@
+<div id="scan-panel" th:fragment="panel">
+  <div class="progress-wrap" th:if="${progress.scanId > 0}">
+    <div class="section-title">
+      <div><strong th:text="${progress.message}">Scanning</strong><div class="muted" th:text="${progress.phase}">PHASE</div></div>
+      <div th:if="${progress.running}" style="display:flex;gap:8px">
+        <button th:if="${progress.phase != 'PAUSED'}" class="btn secondary small" hx-post="/scan/pause" hx-target="#scan-panel" hx-swap="outerHTML" type="button" onclick="return fallbackControl(event,'/scan/pause')">Pause</button>
+        <button th:if="${progress.phase == 'PAUSED'}" class="btn success small" hx-post="/scan/resume" hx-target="#scan-panel" hx-swap="outerHTML" type="button" onclick="return fallbackControl(event,'/scan/resume')">Resume</button>
+        <button class="btn danger small" hx-post="/scan/cancel" hx-target="#scan-panel" hx-swap="outerHTML" type="button" onclick="return fallbackControl(event,'/scan/cancel')">Cancel scan</button>
+      </div>
+      <a th:if="${!progress.running and progress.error == null and !progress.cancelled}" class="btn success small" href="/results">Review results</a>
+    </div>
+    <div class="progress-track" th:classappend="${progress.progressPercent < 0 ? ' indeterminate' : ''}">
+      <div class="progress-bar" th:style="${progress.progressPercent < 0 ? 'width:38%' : 'width:' + progress.progressPercent + '%'}"></div>
+    </div>
+    <div class="progress-meta"><span><b th:text="${progress.filesSeen}">0</b> files discovered</span><span th:text="${progress.progressPercent < 0 ? 'Scanning…' : progress.progressPercent + '%'}">0%</span></div>
+    <div class="current-file" th:text="${progress.currentFile != null ? progress.currentFile : ''}"></div>
+    <div class="metrics">
+      <div class="metric"><span class="muted">Exact groups</span><strong th:text="${progress.duplicateGroups}">0</strong></div>
+      <div class="metric"><span class="muted">Reclaimable</span><strong th:text="${@fmt.bytes(progress.reclaimableBytes)}">0 B</strong></div>
+      <div class="metric"><span class="muted">Similar images</span><strong th:text="${progress.similarImageGroups}">0</strong></div>
+      <div class="metric"><span class="muted">Similar videos</span><strong th:text="${progress.similarVideoGroups}">0</strong></div>
+    </div>
+    <div class="warning" style="margin-top:12px" th:if="${progress.error != null}" th:text="${progress.error}"></div>
+  </div>
+  <div th:if="${progress.scanId == 0}" class="muted">No scan is running. Choose one or more folders and start a scan.</div>
+  <div th:if="${progress.running}" data-running="true" hx-get="/scan/progress" hx-trigger="load delay:1s" hx-target="#scan-panel" hx-swap="outerHTML"></div>
+</div>

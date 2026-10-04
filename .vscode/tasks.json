@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "DupeLens: Run",
+      "type": "shell",
+      "command": "./run.sh",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "DupeLens: Build",
+      "type": "shell",
+      "command": "./build.sh",
+      "group": "build",
+      "problemMatcher": ["$javac"]
+    }
+  ]
+}

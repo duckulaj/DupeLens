@@ -1,0 +1,7 @@
+target/
+.idea/
+data/*.db
+data/*.db-*
+data/thumbs/
+data/tmp/
+*.log

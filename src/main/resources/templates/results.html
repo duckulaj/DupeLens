@@ -1,0 +1,29 @@
+<!doctype html><html lang="en" xmlns:th="http://www.thymeleaf.org"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Results · DupeLens</title><link rel="stylesheet" href="/css/app.css"><script src="/js/app.js" defer></script></head><body>
+<header class="topbar"><div class="shell nav"><a class="brand" href="/"><span class="brandmark">◎</span>DupeLens</a><nav class="navlinks"><a href="/">Dashboard</a><a class="active" href="/results">Duplicates</a><a href="/history">History</a><a href="/settings">Settings</a></nav></div></header>
+<main class="shell">
+<div class="section-title"><div><div class="eyebrow">Scan results</div><h1 style="margin:.3rem 0">Review your library</h1><div class="muted" th:text="${'Scan #' + scanId}">Scan #1</div></div><a class="btn primary" href="/">New scan</a></div>
+<div class="flash" th:if="${message}" th:text="${message}"></div>
+<div class="tabs"><a class="tab" th:classappend="${tab == 'exact' ? ' active' : ''}" th:href="@{/results(tab='exact',scanId=${scanId})}">Exact duplicates</a><a class="tab" th:classappend="${tab == 'images' ? ' active' : ''}" th:href="@{/results(tab='images',scanId=${scanId})}">Similar images</a><a class="tab" th:classappend="${tab == 'videos' ? ' active' : ''}" th:href="@{/results(tab='videos',scanId=${scanId})}">Similar videos</a><a class="tab" th:classappend="${tab == 'ai' ? ' active' : ''}" th:href="@{/results(tab='ai',scanId=${scanId})}">AI photo groups</a></div>
+<div class="toolbar" th:if="${!#lists.isEmpty(groups)}">
+  <button th:if="${tab=='exact'}" class="btn success" type="button" onclick="selectSuggested()">✓ Select suggested</button><button class="btn secondary" type="button" onclick="selectAllVisible()">Select all</button><button class="btn ghost" type="button" onclick="clearSelection()">Clear</button>
+  <div class="field"><label for="moveDestination">Move selected to</label><input id="moveDestination" name="destination" form="bulkForm" placeholder="/home/you/Duplicate-Review"></div>
+  <button class="btn secondary" type="submit" form="bulkForm" formaction="/actions/move" onclick="return validateMove()">Move selected</button>
+  <button class="btn danger" type="submit" form="bulkForm" formaction="/actions/trash" onclick="return confirmTrash()">Move to Trash</button>
+  <span th:if="${tab=='exact'}" class="pill" th:text="${'Potential saving: ' + @fmt.bytes(reclaimable)}">Potential saving</span>
+</div>
+<form id="bulkForm" method="post"><input type="hidden" name="tab" th:value="${tab}"></form>
+<div th:if="${#lists.isEmpty(groups)}" class="panel empty"><h2>No groups found</h2><p th:switch="${tab}"><span th:case="'exact'">No byte-identical duplicate groups were found in this scan.</span><span th:case="'images'">No visually similar image groups met the current threshold.</span><span th:case="'videos'">No similar video groups were found, or FFmpeg was unavailable.</span><span th:case="'ai'">No AI groups are available. Make sure Ollama is running and AI grouping was enabled for the scan.</span></p></div>
+<section class="group-card" th:each="group:${groups}"><div class="group-head"><div><h3 th:text="${group.title}">Group</h3><p th:text="${group.subtitle}">Details</p></div><span th:if="${group.type=='exact'}" class="pill" th:text="${@fmt.bytes(group.reclaimableBytes) + ' reclaimable'}">0</span></div>
+<div class="file-grid"><article class="file-card" th:each="f:${group.files}">
+  <div class="thumb-wrap" th:if="${f.mediaType.name() != 'OTHER'}" th:attr="onclick=|openPreview(${f.id},'${f.mediaType.name()}')|"><img class="thumb" th:src="@{/thumb/{id}(id=${f.id})}" loading="lazy" alt="Preview"><span class="media-badge" th:text="${f.mediaType.name()}">IMAGE</span></div>
+  <div class="thumb-wrap" th:if="${f.mediaType.name() == 'OTHER'}" style="display:grid;place-items:center;font-size:3rem;color:#8a96a8">◧</div>
+  <div class="file-title" th:text="${f.name}">file.jpg</div><div class="file-path" th:text="${f.parent}">/path</div><div class="file-meta"><span th:text="${@fmt.bytes(f.size)}">1 MB</span><span th:text="${@fmt.date(f.modified)}">date</span></div>
+  <div class="ai-summary" th:if="${group.type=='ai' and f.aiSummary != null}" th:text="${f.aiSummary}"></div>
+  <div class="file-actions"><label class="check"><input type="checkbox" name="ids" th:value="${f.id}" form="bulkForm" th:checked="${group.suggestedDeleteIds.contains(f.id)}" th:attr="data-suggested=${group.suggestedDeleteIds.contains(f.id)}"><span th:if="${group.suggestedDeleteIds.contains(f.id)}" class="remove">Suggested remove</span><span th:unless="${group.suggestedDeleteIds.contains(f.id)}">Select</span></label>
+    <span th:if="${group.type=='exact' and !group.suggestedDeleteIds.contains(f.id)}" class="keep">KEEP</span>
+  </div>
+  <form method="post" action="/actions/open" style="margin-top:9px"><input type="hidden" name="id" th:value="${f.id}"><input type="hidden" name="tab" th:value="${tab}"><button class="btn ghost small" type="submit">Open folder</button></form>
+</article></div></section>
+</main>
+<div id="previewModal" class="modal" onclick="if(event.target===this)closePreview()"><div class="modal-card" style="width:min(1100px,96vw)"><div class="modal-head"><strong>Media preview</strong><button class="btn ghost small" onclick="closePreview()">✕</button></div><div id="previewContent" class="preview-content"></div></div></div>
+</body></html>
