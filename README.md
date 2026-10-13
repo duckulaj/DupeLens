@@ -70,6 +70,19 @@ http://localhost:8080
 
 You can also run `DupeLensApplication.java` directly from VS Code after Maven dependencies have loaded.
 
+## Build and deploy
+
+Build the executable Spring Boot JAR and deploy it to `~/DupeLens`:
+
+```bash
+./build.sh
+~/DupeLens/run.sh
+```
+
+The launcher runs from `~/DupeLens`, keeping the SQLite database at
+`~/DupeLens/data/dupelens.db`. The application creates the data, thumbnail,
+and temporary directories on startup if they are missing.
+
 ## Ollama AI setup
 
 DupeLens defaults to:
