@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 project_dir="$(cd "$(dirname "$0")" && pwd)"
-install_dir="$HOME/DupeLens"
+install_dir="/mnt/2TBSSD/DupeLens"
 
 cd "$project_dir"
 ./mvnw clean test package
