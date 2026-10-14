@@ -14,10 +14,11 @@ spring:
       mode: always
   thymeleaf:
     cache: false
+  web:
+    error:
+      include-message: always
 server:
   port: 8080
-  error:
-    include-message: always
 management:
   endpoints:
     web:

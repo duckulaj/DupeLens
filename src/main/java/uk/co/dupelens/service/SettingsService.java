@@ -20,6 +20,7 @@ public class SettingsService {
         DEFAULTS.put("ai.model", "gemma3:4b");
         DEFAULTS.put("preferred.paths", System.getProperty("user.home") + "/Pictures");
         DEFAULTS.put("scan.exclusions", ".git\ntarget\nnode_modules\n.cache\n@eaDir\n.Trash-1000");
+        DEFAULTS.put("scan.roots", "");
         DEFAULTS.put("scan.minFileSizeBytes", "1");
         DEFAULTS.put("scan.maxFileSizeBytes", "0");
         DEFAULTS.put("keeper.strategy", "PREFERRED");
@@ -44,6 +45,17 @@ public class SettingsService {
                 intVal(m,"image.hamming",8), intVal(m,"video.hamming",10), doubleVal(m,"video.durationTolerance",0.03),
                 m.get("ollama.url"), m.get("ai.model"), m.get("preferred.paths"), m.get("scan.exclusions"),
                 longVal(m,"scan.minFileSizeBytes",1), longVal(m,"scan.maxFileSizeBytes",0), m.get("keeper.strategy"));
+    }
+
+    public java.util.List<String> getScanRoots() {
+        ensureDefaults();
+        String roots = jdbc.queryForObject("SELECT setting_value FROM app_setting WHERE setting_key=?", String.class, "scan.roots");
+        return java.util.Arrays.stream(roots.split("\\R")).map(String::trim).filter(s -> !s.isBlank()).distinct().toList();
+    }
+
+    public void saveScanRoots(java.util.List<String> roots) {
+        ensureDefaults();
+        put("scan.roots", roots.stream().map(String::trim).filter(s -> !s.isBlank()).distinct().collect(java.util.stream.Collectors.joining("\n")));
     }
 
     public void save(AppSettings s) {

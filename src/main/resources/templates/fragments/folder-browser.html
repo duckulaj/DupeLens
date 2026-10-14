@@ -1,11 +1,18 @@
 <div th:fragment="browser">
   <div class="folder-current" th:text="${current}">/home</div>
-  <div style="display:flex;gap:8px;margin-top:12px">
+  <section class="folder-selection-summary" aria-live="polite">
+    <strong>Folders included in scan</strong>
+    <ul id="selectedFolderRoots"></ul>
+  </section>
+  <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
     <button th:if="${parent != null}" class="btn secondary small" type="button" th:attr="data-path=${parent}" onclick="loadFolders(this.dataset.path)">⬆ Parent</button>
-    <button class="btn primary small" type="button" th:attr="data-path=${current}" onclick="selectCurrentFolder(this.dataset.path)">✓ Select this folder</button>
+    <label class="check">        <input type="checkbox" data-folder-path th:checked="${selectedRoots.contains(current.toString())}" th:attr="data-path=${current}" onclick="folderSelectionShift=event.shiftKey" onchange="toggleFolderSelection(this)"> Include this folder</label>
   </div>
   <div class="folder-list">
-    <button class="folder" th:each="d:${dirs}" type="button" th:attr="data-path=${d.path}" onclick="loadFolders(this.dataset.path)">📁 <span th:text="${d.name}">Folder</span></button>
+    <div class="folder-entry" th:each="d:${dirs}">
+      <input type="checkbox" data-folder-path th:checked="${selectedRoots.contains(d.path)}" th:attr="data-path=${d.path}" aria-label="Include folder" onclick="folderSelectionShift=event.shiftKey" onchange="toggleFolderSelection(this)">
+      <button class="folder" type="button" th:attr="data-path=${d.path}" onclick="loadFolders(this.dataset.path)">📁 <span th:text="${d.name}">Folder</span></button>
+    </div>
   </div>
   <div class="muted" th:if="${#lists.isEmpty(dirs)}">No readable subfolders.</div>
 </div>
