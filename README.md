@@ -26,7 +26,7 @@ DupeLens is a local-first Spring Boot application inspired by `fdupes`, with a s
 ## Requirements
 
 - Linux Mint / Ubuntu / Debian is the primary target.
-- Java **21 or newer**. Java 25 works.
+- Java **25 or newer**.
 - Maven is optional: `./mvnw` downloads the current Maven 3.x release if `mvn` is not installed.
 - `ffmpeg` + `ffprobe` for similar-video analysis and video thumbnails.
 - `gio` for safe Trash operations.
