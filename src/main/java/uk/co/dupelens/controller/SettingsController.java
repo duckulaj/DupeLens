@@ -8,12 +8,13 @@ import uk.co.dupelens.model.AppSettings;
 import uk.co.dupelens.service.SettingsService;
 import uk.co.dupelens.service.SystemStatusService;
 
+@RequestMapping("/settings")
 @Controller
 public class SettingsController {
     private final SettingsService settings; private final SystemStatusService status;
     public SettingsController(SettingsService settings,SystemStatusService status){this.settings=settings;this.status=status;}
-    @GetMapping("/settings") public String page(Model model){model.addAttribute("settings",settings.get());model.addAttribute("status",status.status());return "settings";}
-    @PostMapping("/settings") public String save(
+    @GetMapping public String page(Model model){model.addAttribute("settings",settings.get());model.addAttribute("status",status.status());return "settings";}
+    @PostMapping public String save(
             @RequestParam int imageHammingThreshold,
             @RequestParam int videoHammingThreshold,
             @RequestParam double videoDurationTolerance,
